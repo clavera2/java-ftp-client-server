@@ -1,4 +1,6 @@
-enum FTPRequestMethod {
-    PULL, //represents a PULL request
-    POLL, //represents a POLL ftp request
+public enum FTPRequestMethod {
+    PULL, // Get request to download a file
+    PUSH, // Put request to upload a file
+    LIST, // Request to list available files
+    QUIT // Close the connection
 }

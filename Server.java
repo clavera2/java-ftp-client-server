@@ -1,90 +1,118 @@
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.net.ServerSocket;
-import java.net.Socket;
+import java.io.*;
+import java.net.*;
+import java.util.*;
 
-/* An FTP Server that implements the client-server architecture
- * This server listens for client connections and handles them using a -
- * - clienthandler inner class. It also tries to handle multiple client connections concurrently
- */
 
-public class Server implements Runnable {
+//IMPLEMENTATION OF THE FTP-SERVER IN THE CLIENT-SERVER ARCHITECTURE
+
+public class Server {
     private int port;
-    private ServerSocket serverSocket; //to listen to incoming client connections
+    private ServerSocket serverSocket;
 
     public Server(int port) {
         this.port = port;
         try {
-            serverSocket = new ServerSocket(this.port);
+            serverSocket = new ServerSocket(port);
+            System.out.println("Server started on port: " + port);
         } catch (IOException e) {
-            System.out.println("could not start server");
+            System.out.println("Could not start server: " + e.getMessage());
         }
     }
 
     public void launch() {
-        System.out.println("Attempting to launch server at port " + port);
-        if (serverSocket == null) {
-            System.out.println("Server is not connected to a socket");
-            return;
-        }
-        while (true) { 
+        while (true) {
             try {
-                Socket connectionSocket = serverSocket.accept();
-                Thread clientThread = new Thread(new ClientHandler(connectionSocket));
+                Socket socket = serverSocket.accept();
+                Thread clientThread = new Thread(new ClientHandler(socket));
+                clientThread.start();
             } catch (IOException e) {
-                System.out.println("problem connecting to client");
+                System.out.println("Error connecting to client: " + e.getMessage());
             }
-        }
-    }
-
-    @Override
-    public void run() {
-        //this might be a problem
-        launch();
-    }
-
-
-    private static class ClientHandler implements Runnable {
-        //class for handling client requests
-        private BufferedReader serverReader; //read client data
-        private BufferedWriter serverWriter; //write to client
-        Socket connectionSocket;
-
-        public ClientHandler(Socket connectionSocket) {
-            this.connectionSocket = connectionSocket;
-            try {
-                this.serverWriter = new BufferedWriter(new PrintWriter(this.connectionSocket.getOutputStream()));
-            } catch (IOException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
-            greetClient();
-        }
-
-        public void greetClient() {
-            try {
-                serverWriter.write("Hello client\n");
-                serverWriter.flush();
-                System.out.println("written to client");
-            } catch (IOException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
-            
-        }
-        
-        //will handle client connections
-        @Override
-        public void run() {
-
-            //logic for handling requests
         }
     }
 
     public static void main(String[] args) {
-        //start the server application
-        new Server(8080).launch();
+        System.out.println("............................................................");
+        System.out.println("Starting FTP-Server on port 8080...");
+        Server server = new Server(8080);
+        server.launch();
+    }
+
+    private static class ClientHandler implements Runnable {
+        private Socket socket;
+        private ObjectInputStream in;
+        private ObjectOutputStream out;
+
+        public ClientHandler(Socket socket) {
+            this.socket = socket;
+            try {
+                in = new ObjectInputStream(socket.getInputStream());
+                out = new ObjectOutputStream(socket.getOutputStream());
+            } catch (IOException e) {
+                System.out.println("Error creating I/O streams: " + e.getMessage());
+            }
+        }
+
+        @Override
+        public void run() {
+            try {
+                FTPRequest request;
+                while ((request = (FTPRequest) in.readObject()) != null) {
+                    switch (request.getMethod()) {
+                        case LIST:
+                            handleListFiles();
+                            break;
+                        case PULL:
+                            handleGetFile(request);
+                            break;
+                        case PUSH:
+                            handlePutFile(request);
+                            break;
+                        case QUIT:
+                            socket.close();
+                            return;
+                    }
+                }
+            } catch (IOException | ClassNotFoundException e) {
+                System.out.println("Error processing request: " + e.getMessage());
+            }
+        }
+
+        private void handleListFiles() throws IOException {
+            File folder = new File("server_files");
+            File[] files = folder.listFiles();
+            List<String> filenames = new ArrayList<>();
+            for (File file : files) {
+                filenames.add(file.getName());
+            }
+            FTPResponse response = new FTPResponse(true, "List of files", filenames, null);
+            out.writeObject(response);
+        }
+
+        private void handleGetFile(FTPRequest request) throws IOException {
+            File file = new File("server_files/" + request.getFileName());
+            if (file.exists() && file.isFile()) {
+                byte[] fileData = new byte[(int) file.length()];
+                try (FileInputStream fis = new FileInputStream(file);
+                     BufferedInputStream bis = new BufferedInputStream(fis)) {
+                    bis.read(fileData);
+                }
+                FTPResponse response = new FTPResponse(true, "File data", null, fileData);
+                out.writeObject(response);
+            } else {
+                FTPResponse response = new FTPResponse(false, "File not found", null, null);
+                out.writeObject(response);
+            }
+        }
+
+        private void handlePutFile(FTPRequest request) throws IOException {
+            File file = new File("server_files/" + request.getFileName());
+            try (FileOutputStream fos = new FileOutputStream(file);
+                 BufferedOutputStream bos = new BufferedOutputStream(fos)) {
+                bos.write(request.getFileData());
+            }
+            FTPResponse response = new FTPResponse(true, "File uploaded successfully", null, null);
+            out.writeObject(response);
+        }
     }
 }
